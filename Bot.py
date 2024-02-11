@@ -1,0 +1,163 @@
+# импорт библиотек
+import telebot
+import Database
+import Buttons
+from telebot import types
+from geopy.geocoders import Nominatim
+# создаём объект бота
+bot = telebot.TeleBot("6445305702:AAFs-36aleeIokRQ0JUIPsVwza5VKeupEfk")
+# создаем временную базу
+geolocation = Nominatim(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/121.0.0.0 Safari/537.36")
+users = {}
+# Database.add_product("Чизбургер3", 20000.0, 20, "Лучший чизбургер2", "https://bkmenu.ru/files/2021/06/chizburger-menu-bk.png")
+# Database.delete_products()
+print(Database.get_all_products())
+# обработчик команды /start
+
+# @bot.message_handler(commands=["start"])
+def start(message):
+    # сохраняем id пользователя
+    user_id = message.from_user.id
+    # проверяем наличие пользователя в базе данных
+    checker = Database.check_user(user_id)
+    # если пользователь есть в бд открываем ему меню
+    if checker == True:
+        bot.send_message(user_id, "Главное меню", reply_markup=Buttons.main_menu())
+    # если пользователя нет в бд, начинаем регистрацию
+    elif checker == False:
+        # отправляем ответ на команду старт
+        bot.send_message(user_id, "Добро пожаловать в бота KFC-test.\n"
+                                  "Начнём регистрацию. Введите своё имя")
+        # переход на этап регистрации
+        bot.register_next_step_handler(message, registration)
+def registration(message):
+    user_id = message.from_user.id
+    name = message.text
+    # просим отправить номер и прикрепляем кнопку
+    bot.send_message(user_id, "Отправьте свой номер телефона", reply_markup=Buttons.get_phone_number())
+    # переход на следующий этап получения номер и сохраняем имя
+    bot.register_next_step_handler(message, get_number, name)
+def get_number(message, name):
+    user_id = message.from_user.id
+    # проверяем в каком формате отправлен номер
+    #если через кнопку
+    if message.contact:
+        phone_number = message.contact.phone_number
+        bot.send_message(user_id, "Вы успешно зарегистрировались", reply_markup=types.ReplyKeyboardRemove())
+        Database.add_user(user_id=user_id, user_name=name, user_phone_number=phone_number)
+        print(Database.get_users())
+    # если номер записан вручную возвращаем его в эту же функцию
+    else:
+        bot.send_message(user_id, "Отправьте свой номер через кнопку")
+        bot.register_next_step_handler(message, get_number, name)
+
+
+@bot.callback_query_handler(lambda call: call.data in ["products", "cart", "feedback", "back",
+                                                       "plus", "minus", "to_cart", "mm", "clear_cart", "order"])
+def for_calls(call):
+    user_id = call.message.chat.id
+    if call.data == "products":
+        bot.delete_message(user_id, call.message.message_id)
+        actual_product = Database.get_pr_id_name()
+        bot.send_message(user_id, "Доступные бургеры", reply_markup=Buttons.products_menu(actual_product))
+    elif call.data == "cart":
+        bot.delete_message(user_id, call.message.message_id)
+        user_cart = Database.get_user_cart(user_id)
+        full_text = f"Ваша Корзина: \n\n"
+        total_amount = 0
+        for i in user_cart:
+            full_text += f"{i[0]} x{i[1]} = {i[2]}\n"
+            total_amount += i[2]
+        full_text += f"\nИтоговая сумма: {total_amount}"
+        bot.send_message(user_id, full_text, reply_markup=Buttons.get_cart_kb())
+    elif call.data == "feedback":
+        bot.delete_message(user_id, call.message.message_id)
+        bot.send_message(user_id, "Напишите ваш отзыв")
+        bot.register_next_step_handler(call.message, feedback_fc)
+    elif call.data == "plus":
+        current_amount = users[user_id]["pr_count"]
+        users[user_id]["pr_count"] += 1
+        bot.edit_message_reply_markup(chat_id=user_id, message_id=call.message.message_id,
+                                      reply_markup=Buttons.exact_product(current_amount, "plus"))
+    elif call.data == "minus":
+        current_amount = users[user_id]["pr_count"]
+        users[user_id]["pr_count"] -= 1
+        if current_amount > 1:
+            bot.edit_message_reply_markup(chat_id=user_id, message_id=call.message.message_id,
+                                      reply_markup=Buttons.exact_product(current_amount, "minus"))
+        else:
+            pass
+    elif call.data == "to_cart":
+        bot.delete_message(user_id, call.message.message_id)
+        to_cart = users[user_id]
+        Database.add_to_cart(user_id, to_cart["pr_id"], to_cart["pr_name"], to_cart["pr_count"])
+        users.pop(user_id)
+        bot.send_message(user_id, "Продукт был добавлен")
+        actual_product = Database.get_pr_id_name()
+        bot.send_message(user_id, "Доступные бургеры", reply_markup=Buttons.products_menu((actual_product)))
+    elif call.data == "back":
+        bot.delete_message(user_id, call.message.message_id)
+        users.pop(user_id)
+        bot.delete_message(user_id, call.message.message_id)
+        actual_product = Database.get_pr_id_name()
+        bot.send_message(user_id, "Доступные бургеры", reply_markup=Buttons.products_menu((actual_product)))
+    elif call.data == "mm":
+        bot.delete_message(user_id, call.message.message_id)
+        bot.send_message(user_id, "Главное меню", reply_markup=Buttons.main_menu())
+    elif call.data == "clear_cart":
+        bot.delete_message(user_id, call.message.message_id)
+        Database.delete_user_cart(user_id)
+        bot.send_message(user_id, "Ваша корзина очищена")
+        bot.send_message(user_id, "Главное меню", reply_markup=Buttons.main_menu())
+    elif call.data == "order":
+        bot.delete_message(user_id, call.message.message_id)
+        user_cart = Database.get_user_cart(user_id)
+        full_text = f"Новый заказ от Юзера {user_id}: \n\n"
+        total_amount = 0
+        for i in user_cart:
+            full_text += f"{i[0]} x{i[1]} = {i[2]}\n"
+            total_amount += i[2]
+        full_text += f"\nИтоговая сумма: {total_amount}"
+        bot.send_message(-1002098241784, full_text)
+        Database.delete_user_cart(user_id)
+        bot.send_message(user_id, "Ваш заказ был принят. Ожидайте 60 минут")
+
+
+
+def feedback_fc(message):
+    user_id = message.from_user.id
+    bot.send_message(-1001954411455, f"{message.text}\n"
+                                     f"Юзер пользователя: {user_id}")
+
+@bot.message_handler(commands=["start"])
+def start_get_location(message):
+    user_id = message.from_user.id
+    bot.send_message(user_id, "Отправьте свою локацию", reply_markup=Buttons.get_location())
+    bot.register_next_step_handler(message, get_location)
+
+def get_location(message):
+    user_id = message.from_user.id
+    if message.location:
+        # Получение широты и долготы
+        latitude = message.location.latitude
+        longitude = message.location.longitude
+        # Преобразовать всё в адресс
+        address = geolocation.reverse((latitude, longitude)).adress
+        bot.send_message(user_id, f"{address} - Это ваш адресс?")
+    else:
+        bot.send_message(user_id, "Отправьте локацию с помощью кнопки")
+        bot.register_next_step_handler(message, get_location)
+@bot.callback_query_handler(lambda call: int(call.data) in Database.get_all_id())
+def calls_for_products(call):
+    user_id = call.message.chat.id
+    product = Database.get_exact_product(int(call.data))
+    users[user_id] = {"pr_id": call.data, "pr_name": product[0], "pr_count": 1}
+
+    bot.send_photo(user_id, photo=product[3], caption=f"{product[0]}\n"
+                          f"Цена:{product[1]}\n"
+                          f"Описание: {product[2]}\n"
+                          f"Выберите количество:", reply_markup=Buttons.exact_product())
+
+bot.infinity_polling()
