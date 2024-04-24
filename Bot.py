@@ -5,7 +5,7 @@ import Buttons
 from telebot import types
 from geopy.geocoders import Nominatim
 # создаём объект бота
-bot = telebot.TeleBot("6445305702:AAFs-36aleeIokRQ0JUIPsVwza5VKeupEfk")
+bot = telebot.TeleBot("")
 # создаем временную базу
 geolocation = Nominatim(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
